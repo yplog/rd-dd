@@ -2,6 +2,8 @@ use strict;
 use warnings;
 use DBI;
 use List::Compare;
+use Getopt::Std;
+use XML::Simple;
 
 =pod
 
@@ -12,57 +14,73 @@ use List::Compare;
 This script compares the files in the PostgreSQL database with the file assets in the directory.
 Deletes files that are not in the database.
 
-Requirements:
-	DBI, 
-	DBI::Pg, 
-	List::Compare
-
 =head2 HOW TO USE
 
-=over 4
+=over 2
 
-=item $DIRECTORY_PATH
+=item Runing With Config File C<perl rd-dd.pl>
 
-The directory containing the files to compare with the database.
+First, a configuration file must be created. Requires the config.xml file.
+If you do not have a config.xml file, use the C<perl rd-dd.pl -g> to create it.
+Example:
 
-=item $DBNAME
+=begin text
 
-PostgreSQL database name.
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+	<path>path\of\directory\</path>
+	<name>database_name</name>
+	<host>127.0.0.1</host>
+	<port>5432</port>
+	<username>postgres</username>
+	<password>root</password>
+	<query>SELECT user_file FROM user</query>
+</config>
 
-=item $HOST
+=end text
 
-PostgreSQL database host address.
+=item Runing With One Line C<perl rd-dd.pl -f -D -H -O -U -P -Q>
 
-=item $PORT
+All parameters are required.
+Example:
 
-PostgreSQL database port address.
+=begin text
 
-=item $USERNAME
+C<perl rd-dd.pl -f "path\of\directory\" -D "database_name" -H "127.0.0.1" -O "5432" -U "postgres" -P "root" -Q "SELECT user_file FROM user">
 
-PostgreSQL database username.
-
-=item $PASSWORD
-
-PostgreSQL database password.
-
-=item QUERY_STRING
-
-SQL is a standard language for storing, manipulating and retrieving data in databases.
-The database partition to compare.
+=end text
 
 =back
 
-=head2 METHODS
-
 =over 4
 
-=item get_directory_files()
+=item C<-f> or <path>
 
-Return directory files array.
+The directory containing the files to compare with the database.
 
-=item get_database_files()
+=item C<-D> or <name>
 
-Return database files array.
+PostgreSQL database name.
+
+=item C<-H> or <host>
+
+PostgreSQL database host address.
+
+=item C<-O> or <port>
+
+PostgreSQL database port address.
+
+=item C<-U> or <username>
+
+PostgreSQL database username.
+
+=item C<-P> or <password>
+
+PostgreSQL database password.
+
+=item C<-Q> or <query>
+
+The database partition to compare.
 
 =back
 
@@ -78,29 +96,125 @@ See L<https://dev.perl.org/licenses/artistic.html>
 
 =cut
 
-# Configration
-my $DIRECTORY_PATH = '';
-my $DBNAME = '';
-my $HOST = '';
-my $PORT = '';
-my $USERNAME = '';
-my $PASSWORD = '';
-my $QUERY_STRING = "";
 
-my @database_files = &get_database_files($DBNAME, $HOST, $PORT, $USERNAME, $PASSWORD, $QUERY_STRING);
-my @directory_files = &get_directory_files($DIRECTORY_PATH);
+sub main {
+	my %opts;
+	getopts('fDHOUPQ:g', \%opts);
 
-my $lc = List::Compare->new(\@directory_files, \@database_files);
-my @deleted_files = $lc->get_unique;
+	if(check_usage(\%opts)){
+		my $directory_path = $opts{'f'};
+		my $dbname = $opts{'D'};
+		my $host = $opts{'H'};
+		my $port = $opts{'O'};
+		my $username = $opts{'U'};
+		my $password = $opts{'P'};
+		my $query_string = $opts{'Q'};
 
-my $number;
-foreach my $file (@deleted_files) {
-	$number = unlink($DIRECTORY_PATH.$file);
+		my @database_files = &get_database_files;
+		my @directory_files = &get_directory_files;
+
+		my $lc = List::Compare->new(\@directory_files, \@database_files);
+		my @deleted_files = $lc->get_unique;
+
+		my $number;
+		foreach my $file (@deleted_files) {
+			$number = unlink(join $directory_path, $file);
+		}
+		print "$number file(s) deleted!\n";
+	}
+	elsif($opts{'g'}){
+		&generate_config_file;
+	}
+	else{
+		if(&check_config_file) {
+			my $c_parser = XML::Simple->new();
+			my $dom = $c_parser->XMLin('./config.xml');
+			my $directory_path = $dom->{path};
+			my $dbname = $dom->{name};
+			my $host = $dom->{host};
+			my $port = $dom->{port};
+			my $username = $dom->{username};
+			my $password = $dom->{password};
+			my $quert_string = $dom->{query};
+
+			my @database_files = &get_database_files;
+			my @directory_files = &get_directory_files;
+
+			my $lc = List::Compare->new(\@directory_files, \@database_files);
+			my @deleted_files = $lc->get_unique;
+
+			my $number;
+			foreach my $file (@deleted_files) {
+				$number = unlink(join $directory_path, $file);
+			}
+			print "$number file(s) deleted!\n";
+		}
+		else {
+			print "Please check config file.\n";
+		}
+	}
 }
-print "$number file(s) deleted!";
+
+&main;
+
+sub check_config_file {
+	my $c_parser = XML::Simple->new();
+	my $dom = $c_parser->XMLin('./config.xml');
+	my $f = $dom->{path};
+	my $D = $dom->{name};
+	my $H = $dom->{host};
+	my $O = $dom->{port};
+	my $U = $dom->{username};
+	my $P = $dom->{password};
+	my $Q = $dom->{query};
+
+	if("" eq $f || "" eq $D || "" eq $H || "" eq $O || "" eq $U || "" eq $P || "" eq $Q){
+		return 0;
+	}
+
+	return 1;
+}
+
+sub generate_config_file {
+	open(my $cf, '>', 'config.xml') or die "Could not opened file!";
+	print $cf qq(<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <path></path>
+  <name></name>
+  <host></host>
+  <port></port>
+  <username></username>
+  <password></password>
+  <query></query>
+</config>);
+	close $cf;
+
+	print 'Generated config.xml file.';
+}
+
+sub check_usage {
+	my $opts = shift;
+
+	my $f = $opts->{'f'};
+	my $D = $opts->{'D'};
+	my $H = $opts->{'H'};
+	my $O = $opts->{'O'};
+	my $U = $opts->{'U'};
+	my $P = $opts->{'P'};
+	my $Q = $opts->{'Q'};
+
+	if(defined($f) && defined($D) && defined($H) && defined($O) && defined($U) && defined($P) && defined($Q)){
+		return 0;
+	}
+
+	return 1;
+}
 
 sub get_directory_files {
-	my ($dir_path) = shift @_;
+	my $c_parser = XML::Simple->new();
+	my $dom = $c_parser->XMLin('./config.xml');
+	my $dir_path = $dom->{path};
+
 	opendir my $dh, $dir_path or die "Cannot open $dir_path";
 	my @dir_files;
 	foreach my $file (readdir $dh) {
@@ -110,8 +224,15 @@ sub get_directory_files {
 }
 
 sub get_database_files {
-	# Connection Config
-	my ($dbname, $host, $port, $username, $password, $quert_string) = @_;
+	my $c_parser = XML::Simple->new();
+	my $dom = $c_parser->XMLin('./config.xml');
+	my $directory_path = $dom->{path};
+	my $dbname = $dom->{name};
+	my $host = $dom->{host};
+	my $port = $dom->{port};
+	my $username = $dom->{username};
+	my $password = $dom->{password};
+	my $quert_string = $dom->{query};
 
 	# Create DB handle object by connection
 	my $dbh = DBI -> connect("dbi:Pg:dbname=$dbname;host=$host;port=$port",
